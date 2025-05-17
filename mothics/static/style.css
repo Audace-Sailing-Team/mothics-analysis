@@ -1,0 +1,423 @@
+/* General Styling */
+body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center horizontally */
+    justify-content: center; /* Center vertically */
+    min-height: 100vh; /* Ensure full height of the viewport */
+    margin: 0;
+    padding: 0;
+}
+
+/* Styling for the status section */
+.status-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    justify-content: center; /* Center-align status items */
+    margin-bottom: 2rem;
+}
+
+.status-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.interface-name {
+    font-size: 1.2rem;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+.status-dot {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    background-color: gray; /* Default color */
+}
+
+.status-dot.online {
+    background-color: green;
+}
+
+.status-dot.noncomm {
+    background-color: yellow;
+}
+
+.status-dot.offline {
+    background-color: red;
+}
+
+/* Styling for the plot container */
+.plot-container {
+    width: 100%;            /* Allow full horizontal stretch */
+    max-width: 100%;        /* Prevent internal limit */
+    margin: 0 auto;         /* Center it if needed */
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center-align plot container */
+    gap: 20px;
+}
+
+.plot-container-inner {
+    width: 100%;            /* Allow full horizontal stretch */
+    max-width: 100%;        /* Prevent internal limit */
+    margin: 0 auto;         /* Center it if needed */
+    display: block;         /* Avoid flex-based centering */
+    flex-direction: column;
+    align-items: center; /* Center-align plot container */
+    gap: 20px;
+}
+
+.data-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+.data-card {
+    background: #ffffff;
+    padding: 12px;  /* Reduced padding */
+    border-radius: 8px;  /* Slightly less rounded */
+    box-shadow: 0 3px 5px rgba(0,0,0,0.1);
+    width: 180px;  /* Smaller width */
+    text-align: center;
+    transition: 0.3s;
+}
+
+.data-card:hover {
+    transform: scale(1.03);
+}
+
+.value {
+    font-size: 20px;  /* Slightly smaller text */
+    font-weight: bold;
+}
+
+.timestamp {
+    margin: 0;
+    line-height: 1.3;
+    font-size: 12px;
+    color: gray;
+}
+
+/* Wrapper to hold both status and data sections */
+.dashboard-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap; /* Allows stacking when needed */
+    gap: 20px;
+}
+
+/* Ensures both sections take equal width on larger screens */
+.status-section, .data-section {
+    flex: 1;
+    min-width: 300px; /* Ensures they don't shrink too much */
+}
+
+/* Status container styling */
+.status-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* Responsive: Stacks items when viewport is narrow */
+@media (max-width: 768px) {
+    .dashboard-container {
+        flex-direction: column; /* Stack on small screens */
+    }
+    .status-section, .data-section {
+        width: 100%;
+    }
+}
+
+.toggle-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+    padding: 5px;
+    user-select: none;
+}
+
+.toggle-header .arrow {
+    font-size: 1.2rem;
+    transition: transform 0.2s ease-in-out;
+}
+
+.collapsed .arrow {
+    transform: rotate(-90deg);
+}
+
+.bk-root {
+    width: 100% !important;
+    max-width: none !important;
+}
+
+.bk-root -bk-plot-layout {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto
+}
+
+-bk-tab-panel {
+    overflow-x: auto
+}		  
+    
+/* Custom class for Bokeh slider row layout */
+.bokeh-slider-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-start;
+    gap: 10px;
+}
+
+/* Target individual Bokeh slider containers */
+.bokeh-slider-row .bk-slider {
+    flex: 1 1 300px !important;
+    min-width: 250px !important;
+    max-width: 100%;
+}
+
+#leaflet-map {
+    height: 500px;
+    width: 100%;
+    /* max-height: 60vh;  /\* no more than 60% of viewport height *\/ */
+    border: 1px solid #ccc;
+    border-radius: 6px;
+}
+
+@media (max-width: 768px) {
+    #leaflet-map {
+        height: 300px;
+        max-height: 50vh;
+    }
+}
+
+.plot-container#leaflet-map-container {
+    margin-top: 2rem;
+}
+
+#leaflet-map-container {
+  position: relative;
+}
+
+#leaflet-map-container .row {
+    flex-wrap: nowrap;
+    gap: 1rem;
+}
+
+#leaflet-map-container .col {
+    min-width: 180px;
+    flex-grow: 1;
+}
+
+#leaflet-map {
+  height: 500px;
+  width: 100%;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+#gps-flag {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background-color: rgba(255, 230, 180, 0.95);
+  color: #555;
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
+  z-index: 800;
+  display: none;
+  pointer-events: none;
+}
+
+input[type="range"].form-range {
+    accent-color: #0d6efd; /* Bootstrap primary */
+    background: rgba(200, 200, 200, 0.3);
+    height: 2px;
+}
+
+input[type="range"].form-range::-webkit-slider-thumb {
+    background-color: #0d6efd;
+    border: none;
+}
+
+input[type="range"].form-range::-moz-range-thumb {
+    background-color: #0d6efd;
+    border: none;
+}
+
+.gps-sliders-container {
+  display: flex;
+  align-items: center;  
+  /* flex-wrap: nowrap; */
+  justify-content: start;
+  gap: 2rem;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.gps-sliders-container .col-auto {
+  min-width: 200px;
+}
+
+.gps-sliders label,
+.gps-sliders .form-text {
+  white-space: nowrap;
+}
+
+.gps-slider .form-text {
+    display: inline-block;
+    min-width: 10ch;      /* Room for e.g. "10s" or "30 min" */
+    text-align: left;
+}
+
+.track-legend {
+  background: rgba(255, 255, 255, 0.9);
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 4px;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
+  min-width: 120px;
+  max-width: 160px;
+}
+
+.legend-title {
+  font-weight: bold;
+  margin-bottom: 4px;
+  text-align: center;
+}
+
+.legend-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-color {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #999;
+  border-radius: 2px;
+}
+
+#leaflet-map {
+  height: 60vh;
+  width: 100%;
+  border-radius: .5rem;
+}
+
+#scrubSlider { height: 1.25rem; }
+
+#variableSelector {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+}
+
+#trackLegend {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 700;          /* above the map, below flag */
+}
+
+.leaflet-control a {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  color: black;
+  background-color: #fff;
+  border-bottom: 1px solid #ccc;
+  padding: 4px;
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.leaflet-control a:last-child {
+  border-bottom: none;
+}
+
+body.dark-mode {
+  background-color: #121212;
+  color: #e0e0e0;
+}
+
+body.dark-mode .card {
+  background-color: #1e1e1e;
+  color: #ddd;
+}
+
+body.dark-mode .form-control,
+body.dark-mode .form-select {
+  background-color: #2c2c2c;
+  color: #fff;
+  border-color: #444;
+}
+
+body.dark-mode .track-legend {
+  background-color: #1e1e1e;
+  color: #eee;
+  border-color: #555;
+  box-shadow: 0 0 6px rgba(0,0,0,0.8);
+}
+
+body.dark-mode .text-muted {
+  color: #bbb !important;
+}
+
+body.dark-mode .dropdown-menu {
+  background-color: #1e1e1e;
+  color: #eee;
+  border-color: #444;
+}
+
+body.dark-mode .dropdown-menu .form-check-label {
+  color: #eee;
+}
+
+body.dark-mode .dropdown-menu .form-check-input {
+  background-color: #333;
+  border-color: #666;
+}
+
+body.dark-mode .dropdown-menu .form-check-input:checked {
+  background-color: #0d6efd;  /* Bootstrap primary */
+  border-color: #0d6efd;
+}
+
+body.dark-mode .dropdown-menu li:hover {
+  background-color: #2a2a2a;
+}
+
+body.dark-mode ::placeholder {
+  color: #aaa !important;
+  opacity: 1;
+}

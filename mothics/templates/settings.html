@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Settings</h2>
+
+{# -- Build list of unique tabs -- #}
+{% set tab_list = [] %}
+{% for key, field in registry.items() %}
+  {% if field.tab and field.tab not in tab_list %}
+    {% set _ = tab_list.append(field.tab) %}
+  {% endif %}
+{% endfor %}
+
+{% macro slug(s) -%}
+  {{- s | replace('/', '-') | replace(' ', '-') | replace(':', '-') -}}
+{%- endmacro %}
+
+<ul class="nav nav-tabs">
+  {% for t in tab_list %}
+    <li class="nav-item">
+      <button class="nav-link {% if loop.first %}active{% endif %}"
+              data-bs-toggle="tab"
+              data-bs-target="#tab-{{ slug(t) }}">
+        {{ t }}
+      </button>
+    </li>
+  {% endfor %}
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-user-prefs">Local preferences</button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-offline-assets">Offline assets</button>
+  </li>
+</ul>
+
+<div class="tab-content mt-3">
+  {% for t in tab_list %}
+  <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="tab-{{ slug(t) }}">
+    <form method="post">
+      {% for key, field in registry.items() if field.tab == t %}
+      {% set sid = slug(key) %}
+      <div class="mb-3">
+        <label for="{{ key }}" class="form-label">{{ field.label or key }}</label>
+
+        {% if field.choices %}
+          <select class="form-select" name="{{ key }}">
+            {% for choice in field.choices %}
+              <option value="{{ choice }}" {{ 'selected' if choice == current[key] else '' }}>{{ choice }}</option>
+            {% endfor %}
+          </select>
+
+        {% elif field.type == 'bool' %}
+          <select class="form-select" name="{{ key }}">
+            <option value="true"  {{ 'selected' if current[key] is true  else '' }}>True</option>
+            <option value="false" {{ 'selected' if current[key] is false else '' }}>False</option>
+          </select>
+
+        {% elif field.type == 'text' %}
+          <textarea class="form-control" rows="6" name="{{ key }}">{{ current[key] }}</textarea>
+
+        {% elif field.type == 'taglist' %}
+          <input type="hidden" name="{{ key }}" id="tag-{{ sid }}"
+                 value="{{ current[key] | join(',') if current[key] is iterable and not current[key] is string else '' }}">
+
+        {% elif field.type == 'kvtable' %}
+          <table class="table table-sm" id="tbl-{{ sid }}">
+            <thead><tr><th>Key</th><th>Alias</th><th></th></tr></thead>
+            <tbody>
+              {% for k, v in (current[key] or {}).items() %}
+              <tr>
+                <td><input class="form-control form-control-sm" value="{{ k }}"></td>
+                <td><input class="form-control form-control-sm" value="{{ v }}"></td>
+                <td><button class="btn btn-sm btn-danger">×</button></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-add-row="{{ sid }}">Add row</button>
+          <input type="hidden" name="{{ key }}" id="hidden-{{ sid }}">
+
+        {% else %}
+          <input type="text" class="form-control" name="{{ key }}"
+                 placeholder="{{ field.placeholder or '' }}" value="{{ current[key] }}">
+        {% endif %}
+      </div>
+      {% endfor %}
+      <button type="submit" class="btn btn-primary">Save {{ t }}</button>
+    </form>
+  </div>
+  {% endfor %}
+
+  <div class="tab-pane fade" id="tab-user-prefs">
+    <p class="text-muted">These settings are stored in your browser and do not affect other users.</p>
+    <div id="local-user-prefs-form"></div>
+    <button class="btn btn-secondary mt-3" id="saveLocalPrefsBtn">Save preferences</button>
+  </div>
+
+  <div class="tab-pane fade" id="tab-offline-assets">
+    <div class="mb-3">
+      <h5 class="mt-4">GPS map tiles download</h5>
+      <label for="tileBbox" class="form-label">Bounding Box</label>
+      <input id="tileBbox" type="text" class="form-control"
+             placeholder="lat_min, lon_min, lat_max, lon_max"
+             value="{{ current['tiles_bbox'] | join(', ') }}">
+    </div>
+
+    <div class="mb-3">
+      <label for="tileZooms" class="form-label">Zoom levels</label>
+      <input id="tileZooms" type="text" class="form-control"
+             placeholder="e.g. 10,11,12,13,14"
+             value="{{ current['tiles_zooms'] | join(',') }}">
+    </div>
+
+    <div class="mb-3">
+      <button class="btn btn-outline-info" id="estimateTilesBtn">Estimate size</button>
+      <button class="btn btn-outline-primary" id="downloadTilesBtn" disabled>⬇ Download tiles</button>
+    </div>
+
+    <div id="tileEstimate" class="small text-muted"></div>
+    <div class="progress mt-2" style="height: 20px; display: none;" id="tileProgressWrap">
+      <div id="tileProgressBar" class="progress-bar" role="progressbar"
+           style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        0%
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <h5 class="mt-4">CDN download</h5>
+      <button class="btn btn-outline-primary" id="downloadCDNsBtn">⬇ Download CDN libraries</button>
+      <small class="form-text text-muted">Saves JS/CSS assets currently used</small>
+    </div>
+
+    <div id="offlineStatus" class="mt-3 small text-muted"></div>
+  </div>
+</div>
+
+<div class="mt-4 d-flex align-items-center gap-3">
+  <button id="saveConfigBtn" class="btn btn-outline-primary">
+    <i class="fas fa-save me-1"></i> Save settings to file
+  </button>
+  <span id="saveStatus" class="text-muted small"></span>
+</div>
+
+<!-- Local preferences (tagify, taglist, saveConfig) -->
+<script type="module">
+  import {
+    buildLocalPrefsForm,
+    loadLocalPrefsToForm,
+    saveLocalPrefsFromForm
+  } from "{{ url_for('static', filename='local_preferences.js') }}";
+
+  window.addEventListener('DOMContentLoaded', () => {
+    buildLocalPrefsForm("local-user-prefs-form");
+    loadLocalPrefsToForm();
+    document.getElementById("saveLocalPrefsBtn")
+      .addEventListener("click", saveLocalPrefsFromForm);
+  });
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // --- Tagify inputs ---
+  document.querySelectorAll('input[id^="tag-"]').forEach(el => {
+    new Tagify(el, {
+      delimiters: ',',
+      dropdown: { enabled: 0 },
+      originalInputValueFormat: valuesArr => valuesArr.map(v => v.value)
+    });
+  });
+
+  // --- KV tables ---
+  document.querySelectorAll('table[id^="tbl-"]').forEach(tbl => {
+    const sid = tbl.id.replace('tbl-', '');
+    const hidden = document.getElementById('hidden-' + sid);
+
+    document.querySelector(`[data-add-row="${sid}"]`)
+      ?.addEventListener('click', () => {
+        tbl.tBodies[0].insertAdjacentHTML('beforeend', `
+          <tr>
+            <td><input class="form-control form-control-sm"></td>
+            <td><input class="form-control form-control-sm"></td>
+            <td><button class="btn btn-sm btn-danger">×</button></td>
+          </tr>`);
+      });
+
+    tbl.addEventListener('click', e => {
+      if (e.target.matches('button')) e.target.closest('tr').remove();
+    });
+
+    tbl.closest('form').addEventListener('submit', () => {
+      const out = {};
+      tbl.querySelectorAll('tbody tr').forEach(tr => {
+        const k = tr.cells[0].firstElementChild.value.trim();
+        const v = tr.cells[1].firstElementChild.value.trim();
+        if (k) out[k] = v;
+      });
+      hidden.value = JSON.stringify(out);
+    });
+  });
+
+  // --- Save config to file ---
+  const saveBtn = document.getElementById("saveConfigBtn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const label = document.getElementById("saveStatus");
+      saveBtn.disabled = true;
+      label.textContent = "Saving…";
+      try {
+        const res = await fetch("/api/write_config", { method: "POST" });
+        const json = await res.json();
+        label.textContent = res.ok ? "✔ Saved" : `❌ ${json.error || "Save failed"}`;
+      } catch (err) {
+        console.error(err);
+        label.textContent = "❌ Network error";
+      } finally {
+        setTimeout(() => {
+          label.textContent = "";
+          saveBtn.disabled = false;
+        }, 5000);
+      }
+    });
+  }
+
+  // --- Tile estimation and download ---
+  const tileBbox = document.getElementById("tileBbox");
+  const tileZooms = document.getElementById("tileZooms");
+  const estimateBtn = document.getElementById("estimateTilesBtn");
+  const downloadBtn = document.getElementById("downloadTilesBtn");
+  const estimateLabel = document.getElementById("tileEstimate");
+  const progressWrap = document.getElementById("tileProgressWrap");
+  const progressBar = document.getElementById("tileProgressBar");
+
+  estimateBtn?.addEventListener("click", async () => {
+    const bbox = tileBbox.value;
+    const zooms = tileZooms.value;
+
+    try {
+      const res = await fetch(`/api/estimate_tiles?bbox=${bbox}&zooms=${zooms}`);
+      const data = await res.json();
+
+      if (res.ok) {
+        estimateLabel.textContent = `${data.count} tiles estimated (${data.size_mb} MB approx)`;
+        downloadBtn.disabled = false;
+      } else {
+        estimateLabel.textContent = `❌ ${data.error || "Invalid input"}`;
+      }
+    } catch (e) {
+      estimateLabel.textContent = "❌ Network error during estimation";
+    }
+  });
+
+  downloadBtn?.addEventListener("click", async () => {
+    const bbox = tileBbox.value;
+    const zooms = tileZooms.value;
+
+    estimateLabel.textContent = "⏳ Downloading tiles…";
+    progressWrap.style.display = "block";
+    progressBar.style.width = "0%";
+    progressBar.setAttribute("aria-valuenow", "0");
+    progressBar.textContent = "0%";
+
+    let pollTimer = null;
+    let progress = 0;
+
+    try {
+      pollTimer = setInterval(() => {
+        progress = Math.min(progress + Math.random() * 10 + 5, 95);
+        progressBar.style.width = `${progress.toFixed(0)}%`;
+        progressBar.setAttribute("aria-valuenow", progress.toFixed(0));
+        progressBar.textContent = `${progress.toFixed(0)}%`;
+      }, 300);
+
+      const res = await fetch(`/api/download_tiles?bbox=${bbox}&zooms=${zooms}`, { method: "POST" });
+      const data = await res.json();
+
+      clearInterval(pollTimer);
+      progressBar.style.width = "100%";
+      progressBar.setAttribute("aria-valuenow", "100");
+      progressBar.textContent = "100%";
+
+      if (res.ok) {
+        estimateLabel.textContent = `✔ ${data.saved} tiles downloaded.`;
+      } else {
+        estimateLabel.textContent = `❌ ${data.error || "Download failed"}`;
+      }
+    } catch (err) {
+      clearInterval(pollTimer);
+      estimateLabel.textContent = "❌ Network or server error during download";
+    } finally {
+      setTimeout(() => {
+        progressWrap.style.display = "none";
+      }, 1500);
+    }
+  });
+
+  // --- CDN download ---
+  document.getElementById("downloadCDNsBtn")?.addEventListener("click", async () => {
+    const status = document.getElementById("offlineStatus");
+    status.textContent = "Downloading CDN files…";
+    try {
+      const res = await fetch("/api/download_cdns", { method: "POST" });
+      const data = await res.json();
+      status.textContent = res.ok ? `✔ ${data.saved} files downloaded` : `❌ ${data.error}`;
+    } catch (err) {
+      status.textContent = "❌ Network error";
+    }
+  });
+});
+</script>
+{% endblock %}

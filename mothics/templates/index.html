@@ -1,0 +1,478 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4 text-center">Dashboard</h1>
+
+<!-- === Control panel =============================================== -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-bold">
+    Track controls
+    <span class="badge bg-{{ 'success' if online else 'secondary' }}">
+      {{ 'Online' if online else 'Offline mode' }}
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <!-- Track selector -->
+      <div class="col-md-4">
+        <label for="trackSelector" class="form-label">Select track</label>
+        <select id="trackSelector" class="form-select">
+          <option value="">Choose a track …</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+	<label class="form-label">Track stride</label>
+	<select id="strideSelector" class="form-select form-select-sm">
+	  <option value="1">every point</option>
+	  <option value="2">1 / 2</option>
+	  <option value="5" selected>1 / 5</option>
+	  <option value="10">1 / 10</option>
+	  <option value="25">1 / 25</option>
+	  <option value="100">1 / 100</option>
+	  <option value="1000">1 / 1000</option>
+	</select>
+      </div>
+      
+      <!-- Scrubber range slider & window -->
+      <div class="col-md-8">
+	<label for="scrubSlider" class="form-label">Scrub window</label>
+	<div id="scrubSlider" style="height: 1.25rem;"></div>
+	<div class="small text-muted mt-1">
+	  <span id="scrubStartLabel">start</span> – <span id="scrubEndLabel">end</span>
+	</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- === Map + Plots ================================================= -->
+<div class="row">
+  <!-- GPS map ------------------------------------------------------- -->
+  <div class="col-md-6 mb-4">
+    <div class="card h-100">
+      <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+	<span>GPS map</span>
+	
+	<!-- “Color by …” selector floats right in the header -->
+	<div class="d-flex align-items-center">
+	  <label for="colorVarSelector" class="form-label mb-0 me-2">Color&nbsp;by</label>
+	  <select id="colorVarSelector" class="form-select form-select-sm w-auto"></select>
+	</div>
+      </div>
+      
+      <div class="card-body p-0 position-relative">
+	<div id="leaflet-map"></div>
+	
+	<!-- legend and GPS flag are absolute overlays -->
+	<div id="trackLegend" class="track-legend" style="display:none;"></div>
+	<div id="gps-flag" class="position-absolute top-0 start-0
+				  bg-danger text-white px-2 py-1 small" style="display:none;">
+	  GPS unavailable
+	</div>
+      </div>
+    </div>
+  </div>
+    
+<!-- Time-evolution plots ----------------------------------------- -->
+  <div class="col-md-6 mb-4">
+    <div class="card h-100">
+      <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+	<span>Time evolution</span>
+	
+	<!-- ▼ variable–picker dropdown -->
+	<div class="dropdown">
+          <button class="btn btn-sm btn-outline-primary dropdown-toggle"
+                  type="button" id="varPickerBtn" data-bs-toggle="dropdown"
+                  aria-expanded="false">
+            Variables
+        </button>
+          <ul id="variableSelector" class="dropdown-menu p-2"
+              style="max-height:220px; overflow-y:auto; min-width:240px;">
+            <!-- checkboxes injected by JS -->
+          </ul>
+	</div>
+      </div>
+      
+      <div class="card-body">
+	<div id="plotly-container" style="height:60vh;"></div>
+      </div>
+    </div>
+  </div>
+  
+<script>
+/* ---------------------------------------------------------------
+   Globals
+-----------------------------------------------------------------*/
+let allTimestamps = [];          // array of JS Date objects (current track)
+let slider        = null;        // noUiSlider instance (dual-handle)
+let leafletMap    = null;        // Leaflet map object
+let gpsMarker     = null;        // Circle marker
+let trackLine     = null;        // Leaflet polyline instance
+  
+/* ---------------------------------------------------------------
+   Utilities
+-----------------------------------------------------------------*/
+const $ = sel => document.querySelector(sel);
+const fmt = ts => ts.toISOString().replace('T',' ').slice(0,19);   // human ISO
+const prefs = JSON.parse(localStorage.getItem("localPreferences") || "{}");
+const unitPrefs = prefs.units || {};
+  
+/* ---------------------------------------------------------------
+   Track dropdown population
+-----------------------------------------------------------------*/
+async function populateTrackList() {
+  const dropdown = $('#trackSelector');
+  try {
+    const tracks = await (await fetch('/api/track_list')).json();
+    tracks.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.filename;
+      opt.textContent = t.label;
+      dropdown.appendChild(opt);
+    });
+  } catch (e) {
+    console.error('Error loading track list:', e);
+  }
+}
+
+/* ---------------------------------------------------------------
+   Track loading  → timestamps → slider init
+   -----------------------------------------------------------------*/
+async function loadTrack(fname) {
+  if (!fname) return;
+
+  try {
+    const res  = await fetch(`/api/load_track/${fname}`);
+    const data = await res.json();
+      
+    if (!res.ok || !data.total_points || !Array.isArray(data.timestamps)) {
+      throw new Error('Bad response');
+    }
+
+    /* ─────────── slider & first scrub ─────────── */
+    allTimestamps = data.timestamps.map(t => new Date(t));
+    rebuildSlider();
+    await updateGPS();
+
+    /* ─────────── populate check-list & colour-by ─────────── */
+    if (!data.timestamps.length) return;              // guard
+
+    const start   = data.timestamps[0];
+    const end     = data.timestamps[data.timestamps.length - 1];
+    const plotRes = await fetch(`/api/track_plot_data?start=${start}&end=${end}`);
+    const plotData= await plotRes.json();
+    const aliases = plotData.aliases || {};
+
+    const selector  = $('#variableSelector');
+    selector.innerHTML = '';                          // reset
+
+    if (!plotData.vars) return;                       // nothing to show
+
+    const varKeys = Object.keys(plotData.vars);
+
+    /*   ▼ 1 — build dropdown list   */
+    varKeys.forEach((key,i) => {
+      selector.insertAdjacentHTML('beforeend', `
+        <li>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox"
+                   value="${key}" id="var-${i}" ${i < 3 ? 'checked' : ''}>
+            <label class="form-check-label ms-1" for="var-${i}">
+                   ${aliases[key] || key}
+            </label>
+          </div>
+        </li>`);
+    });
+
+    /*   ▼ 2 — single listener attach   */
+    selector.querySelectorAll('input').forEach(cb =>
+      cb.addEventListener('change', handleScrub)
+    );
+
+    /*   ▼ 3 — colour-by dropdown   */
+    const gpsVars = varKeys.filter(k =>
+      k.includes('/gps/') && !k.endsWith('/lat') && !k.endsWith('/long')
+    );
+
+    const colorSel = $('#colorVarSelector');
+    colorSel.innerHTML = '';
+    gpsVars.forEach(k => {
+      colorSel.insertAdjacentHTML('beforeend',
+        `<option value="${k}">${aliases[k] || k}</option>`);
+    });
+    // ensure dropdown change triggers recolour
+    colorSel.onchange = handleScrub;
+
+    handleScrub();                                    // plot + map once
+  } catch (e) {
+    console.error('Track load error:', e);
+    alert('Failed to load track.');
+  }
+}
+  
+/* ---------------------------------------------------------------
+   noUiSlider (dual-handle) setup / teardown
+-----------------------------------------------------------------*/
+function rebuildSlider() {
+  const host = $('#scrubSlider');
+
+  if (slider) slider.destroy();      // idempotent
+
+  slider = noUiSlider.create(host, {
+    start:  [0, allTimestamps.length - 1],
+    connect:true,
+    step:   1,
+    range:  { min: 0, max: allTimestamps.length - 1 },
+    behaviour: 'drag',
+    keyboardSupport: true
+  });
+
+  slider.on('update', handleScrub);
+}
+
+/* ---------------------------------------------------------------
+   On scrub  → label update + backend notify
+   -----------------------------------------------------------------*/
+function toLocalNaiveISO(date) {
+  // 1. Move “date” back from UTC into local time
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  // 2. Return ISO string **without** the trailing “Z”
+  return local.toISOString().slice(0, -1);
+}
+
+  async function handleScrub() {
+  if (!slider || allTimestamps.length === 0) return;
+
+  const [iStart, iEnd] = slider.get().map(Number);
+  const startTS = allTimestamps[iStart];
+  const endTS   = allTimestamps[iEnd];
+
+  $('#scrubStartLabel').textContent = fmt(startTS);
+  $('#scrubEndLabel').textContent   = fmt(endTS);
+
+  const qs = new URLSearchParams({
+      start: toLocalNaiveISO(startTS),   // was startTS.toISOString()
+      end:   toLocalNaiveISO(endTS)      // was endTS.toISOString()
+  });
+
+  fetch(`/api/scrub_window?${qs}`).catch(console.error);
+
+  updateGPS();
+  await updatePlot(qs);
+  await updateTrackLine(qs);
+
+}
+
+/* ---------------------------------------------------------------
+   Plot 
+-----------------------------------------------------------------*/
+function convertValue(val, varName, prefs) {
+  if (varName.includes("/speed")) {
+    const mode = prefs["speed"];
+    if (mode === "km/h") return val * 3.6;
+    if (mode === "knots") return val * 1.94384;
+  }
+  if (varName.includes("/temp")) {
+    const mode = prefs["temperature"];
+    if (mode === "C") return val - 273.15;
+    if (mode === "F") return (val - 273.15) * 9/5 + 32;
+  }
+  return val;
+}
+  
+async function updatePlot(baseQS) {
+    const vars = getSelectedVars();
+    
+  if (vars.length === 0) {
+    Plotly.purge('plotly-container');
+    return;
+  }
+    
+  const qs = new URLSearchParams(baseQS);
+  qs.set('vars', vars.join(','));
+
+  try {
+    const res = await fetch(`/api/track_plot_data?${qs}`);
+    const data = await res.json();
+    const aliases = data.aliases || {};
+
+    if (!data || !data.timestamps || !data.vars) return;
+
+    const traces = Object.entries(data.vars).map(([key, values]) => {
+    const converted = values.map(v => convertValue(v, key, unitPrefs));
+    return {
+	x: data.timestamps,
+	y: converted,
+	mode: 'lines+markers',
+	name: aliases[key] || key,
+	type: 'scattergl'
+    };
+    });
+
+    const layout = {
+      title: '',
+      height: 400,
+      margin: { t: 40, r: 30, l: 60, b: 50 },
+      xaxis: { title: 'Time' },
+      yaxis: { title: 'Value' },
+      legend: { orientation: 'h' }
+    };
+
+    function isDarkMode() {
+	return localStorage.getItem("darkMode") === "on";
+    }
+
+    layout.template = isDarkMode() ? "plotly_dark" : "plotly_white";
+          
+    Plotly.newPlot('plotly-container', traces, layout, { responsive: true });
+  } catch (e) {
+    console.error('Plot update failed:', e);
+  }
+}
+
+function getSelectedVars() {
+  return Array.from(document.querySelectorAll('#variableSelector input:checked'))
+              .map(input => input.value);
+}
+  
+/* ---------------------------------------------------------------
+   GPS  (unchanged logic, minor cleanup)
+-----------------------------------------------------------------*/
+async function updateGPS() {
+  try {
+    const data = await (await fetch('/api/gps_info')).json();
+    const gps = data.latest_position;
+    if (!gps || isNaN(gps.lat) || isNaN(gps.lon)) {
+      $('#gps-flag').style.display = 'block';
+      return;
+    }
+    $('#gps-flag').style.display = 'none';
+
+    if (!leafletMap) initMap(gps.lat, gps.lon);
+    gpsMarker.setLatLng([gps.lat, gps.lon]);
+    leafletMap.panTo([gps.lat, gps.lon]);
+  } catch (e) {
+    console.warn('GPS fetch failed:', e);
+  }
+}
+
+async function updateTrackLine(qs){
+  qs.set('stride', $('#strideSelector').value);
+  qs.set('color_var', $('#colorVarSelector').value || '');
+
+  const res  = await fetch(`/api/gps_track_window?${qs}`);
+  const data = await res.json();
+  const pts  = data.track;
+
+  if(trackLine){ leafletMap.removeLayer(trackLine); trackLine = null; }
+  if(!pts || pts.length < 2) return;
+
+  // colour-segmented line
+  const segs = [];
+  for(let i=1;i<pts.length;i++){
+    const c = colourFor(pts[i].val, data.thresholds, data.colours);
+    segs.push(L.polyline([[pts[i-1].lat, pts[i-1].lon],
+                          [pts[i].lat,   pts[i].lon]], {color:c, weight:3}));
+  }
+  trackLine = L.layerGroup(segs).addTo(leafletMap);
+
+  const aliases = data.aliases || {};
+  const colorLabel = aliases[data.color_var] || data.color_var;
+  buildLegend(data.thresholds, data.colours, '', colorLabel);
+}
+  
+function initMap(lat, lon) {
+  leafletMap = L.map('leaflet-map').setView([lat, lon], 14);
+  
+  const tileURL = window.ONLINE_MODE
+	? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+	: "/tiles/{z}/{x}/{y}.png";
+
+    L.tileLayer(tileURL, {
+	attribution: window.ONLINE_MODE ? "OpenStreetMap" : "Local tiles"
+    }).addTo(leafletMap);
+
+  gpsMarker = L.circleMarker([lat, lon], {
+    radius:8, color:'blue', fillColor:'#3399ff', fillOpacity:0.8
+  }).addTo(leafletMap);
+
+  addMapZoomControls();
+}
+
+function addMapZoomControls() {
+  const ZoomCtrl = L.Control.extend({
+    options: { position: 'topleft' },   // Just below native zoom
+
+    onAdd: function () {
+      const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+
+      div.innerHTML = `
+        <a href="#" id="zoom-full-in" title="Zoom to max">⤢</a>
+        <a href="#" id="zoom-full-out" title="Zoom to min">⤡</a>
+        <a href="#" id="recenter-map" title="Recenter">◎</a>
+      `;
+
+      // Prevent map drag on click
+      L.DomEvent.disableClickPropagation(div);
+      return div;
+    }
+  });
+
+  leafletMap.addControl(new ZoomCtrl());
+
+  $('#zoom-full-in').addEventListener('click', e => {
+    e.preventDefault();
+    leafletMap.setZoom(leafletMap.getMaxZoom());
+  });
+
+  $('#zoom-full-out').addEventListener('click', e => {
+    e.preventDefault();
+    leafletMap.setZoom(leafletMap.getMinZoom());
+  });
+
+  $('#recenter-map').addEventListener('click', e => {
+    e.preventDefault();
+    if (gpsMarker) leafletMap.panTo(gpsMarker.getLatLng());
+  });
+}
+  
+function colourFor(val, thresholds, colours){
+  if(val == null) return colours[0];
+  for(let i=0;i<thresholds.length;i++){
+    if(val < thresholds[i]) return colours[i];
+  }
+  return colours[colours.length-1];
+}  
+  
+function buildLegend(thresholds, colours, units, label){
+  const wrap = $('#trackLegend');
+  wrap.innerHTML = `
+    <div class="legend-title">${label}</div>
+    <div class="legend-entries"></div>`;
+  const entries = wrap.querySelector('.legend-entries');
+  const ranges  = ['< ' + thresholds[0]]
+      .concat(thresholds.slice(1).map((t,i)=>`${thresholds[i]}–${t}`))
+      .concat(['≥ ' + thresholds[thresholds.length-1]]);
+  ranges.forEach((txt,i)=>{
+    entries.insertAdjacentHTML('beforeend',
+      `<div class="legend-row">
+         <span class="legend-color" style="background:${colours[i]}"></span>${txt}
+       </div>`);
+  });
+  wrap.style.display = 'block';
+}
+  
+/* ---------------------------------------------------------------
+   DOM ready
+   -----------------------------------------------------------------*/
+document.addEventListener('DOMContentLoaded', () => {
+  populateTrackList();
+
+  $('#trackSelector')?.addEventListener('change', e => loadTrack(e.target.value));
+  $('#strideSelector')?.addEventListener('change', handleScrub);
+  $('#colorVarSelector')?.addEventListener('change', handleScrub);
+});
+
+</script>
+
+{% endblock %}
