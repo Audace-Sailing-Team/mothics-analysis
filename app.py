@@ -27,11 +27,13 @@ if __name__ == "__main__":
     
     # Start Database
     out_dir = config["files"]["output_dir"]
-    db = Database(directory=out_dir)
+    db = Database(directory=out_dir,
+                  rm_thesaurus=config["webapp"]["rm_thesaurus"],
+                  validation=config["database"]["validation"])
     
     # Build WebApp instance
     app = WebApp(logger_fname=config["files"]["logger_fname"],
-                 rm_thesaurus=config["webapp"]["rm_thesaurus"], #remove
+                 rm_thesaurus=config["webapp"]["rm_thesaurus"],
                  data_thesaurus=config["webapp"]["data_thesaurus"],
                  hidden_data_plots=config["webapp"]["hidden_data_plots"],
                  track_manager=db,
@@ -43,4 +45,4 @@ if __name__ == "__main__":
                  )
     
     # Run the Flask app
-    app.debug(port=5000)
+    app.serve(port=config["webapp"]["port"])
